@@ -7,6 +7,7 @@ package httpclient
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"github.com/json-iterator/go"
@@ -22,6 +23,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -30,11 +32,15 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type HttpClient struct {
 	RequestConfig
-	rcd       *clientmod.HttpRequestRcd
-	req       *http.Request
-	res       *http.Response
-	tableName string
-	Error     error
+	rcd           *clientmod.HttpRequestRcd
+	req           *http.Request
+	res           *http.Response
+	tableName     string
+	once          sync.Once
+	Error         error
+	retryCount    int   // 重试次数统计
+	retry         int   // 重试次数
+	retryInterval []int // 重试间隔
 }
 
 // NewHttpClient
@@ -222,6 +228,91 @@ func (rc *RequestConfig) Request(urlPath, method string, data interface{}, rcd *
 	return hc
 }
 
+// do
+/**
+ *  @Description: 带重试的请求
+ *  @receiver hc
+ *  @param req
+ *  @return response
+ *  @return err
+ */
+func (hc *HttpClient) do(req *http.Request) (response *http.Response, err error) {
+	if hc.retry <= 1 {
+		hc.retry = 1
+	}
+	for hc.retryCount = 1; hc.retryCount <= hc.retry; hc.retryCount++ {
+		if hc.retryCount != 1 {
+			hc.rcd.Remark = "第" + strconv.Itoa(hc.retryCount-1) + "请求重试"
+			log.Println(hc.rcd.Remark)
+		}
+		response, err = hc.request(req)
+		if err != nil {
+			if hc.retryCount != hc.retry {
+				hc.rcd.ID = ""
+				hc.rcd.CreateTime = time.Now().Format("2006-01-02 15:04:05")
+				time.Sleep(time.Duration(hc.retryInterval[hc.retryCount-1]) * time.Second)
+			}
+			continue
+		} else {
+			break
+		}
+	}
+	return
+}
+
+// request
+/**
+ *  @Description: 请求
+ *  @receiver hc
+ *  @param req
+ *  @return response
+ *  @return err
+ */
+func (hc *HttpClient) request(req *http.Request) (response *http.Response, err error) {
+	defer func() {
+		hc.saveRcd()
+	}()
+	// 这里创建了一个设置了超时时间的context
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(hc.TimeOut)*time.Second)
+	defer cancel()
+
+	now := time.Now()
+	hc.rcd.Timestamp = now.Format("2006-01-02 15:04:05")
+	// 将有超时的context传递给client.do
+	hc.res, hc.Error = hc.RequestConfig.httpConnPoll.Do(req.WithContext(ctx))
+	response, err = hc.res, hc.Error
+	if hc.Error != nil {
+		select {
+		// select 等待超时返回结果，当http请求时间超出我们设定的时间时，context就会中断请求
+		case <-ctx.Done():
+			hc.rcd.Latency = time.Now().Sub(now).Milliseconds()
+			hc.Error = ctx.Err()
+		}
+	}
+	return
+}
+
+// Retry
+/**
+ *  @Description: 重试
+ *  @receiver hc
+ *  @param retry 重试次数
+ *  @param retryInterval 每次重试之间的间隔（如：[2,2,2,2,2]、[1,2,3,4,5]）
+ *  @return *HttpClient
+ */
+func (hc *HttpClient) Retry(retry int, retryInterval []int) *HttpClient {
+	if retry <= 0 {
+		hc.retry = 1
+	} else {
+		hc.retry = retry
+	}
+	if len(hc.retryInterval) < retry-1 {
+		hc.Error = errors.New("重试间隔时间不完整")
+	}
+	hc.retryInterval = retryInterval
+	return hc
+}
+
 // GetBytes
 /**
  *  @Description: 获取Bytes
@@ -236,7 +327,7 @@ func (hc *HttpClient) GetBytes(body *[]byte) *HttpClient {
 	now := time.Now()
 	hc.rcd.Timestamp = now.Format("2006-01-02 15:04:05")
 	// 发起Http请求
-	hc.res, hc.Error = hc.RequestConfig.httpConnPoll.Do(hc.req)
+	hc.res, hc.Error = hc.do(hc.req)
 	if hc.Error != nil {
 		return hc
 	}
@@ -249,7 +340,6 @@ func (hc *HttpClient) GetBytes(body *[]byte) *HttpClient {
 		return hc
 	}
 	hc.rcd.ResponseHeader = string(jsonByte)
-
 	// 这步是必要的，防止以后的内存泄漏，切记
 	defer hc.res.Body.Close()
 	*body, hc.Error = ioutil.ReadAll(hc.res.Body)
@@ -270,16 +360,17 @@ func (hc *HttpClient) saveRcd() *HttpClient {
 	if hc.RequestConfig.DB == nil {
 		hc.Error = errors.New("数据库链接不存在")
 	}
-	// 查询表是否存在
-	hasTable := hc.DB.Migrator().HasTable(hc.tableName)
-	if !hasTable {
+	var dbErr error
+	// 只对表创建一次
+	hc.once.Do(func() {
 		// 没有表,创建表
-		hc.Error = hc.DB.Table(hc.tableName).AutoMigrate(&clientmod.HttpRequestRcd{})
-		if hc.Error != nil {
-			hc.Error = errors.New("创建表失败:" + hc.Error.Error())
-			return hc
-		}
+		dbErr = hc.DB.Table(hc.tableName).AutoMigrate(&clientmod.HttpRequestRcd{})
+	})
+	if dbErr != nil {
+		hc.Error = errors.New("创建表失败:" + dbErr.Error())
+		return hc
 	}
+
 	if hc.rcd.ID == "" {
 		hc.rcd.ID = commons.UUID()
 		hc.rcd.CreateTime = time.Now().Format("2006-01-02 15:04:05")
@@ -366,10 +457,6 @@ func (hc *HttpClient) GetString(str *string) *HttpClient {
 	}
 	// byte数组直接转成string，优化内存
 	*str = *(*string)(unsafe.Pointer(&body))
-	//answer := string(body)
-	//if str != nil {
-	//	*str = answer
-	//}
 	return hc
 }
 
@@ -388,7 +475,7 @@ func (hc *HttpClient) DownloadFile(filePath, fileName string) *HttpClient {
 	now := time.Now()
 	hc.rcd.Timestamp = now.Format("2006-01-02 15:04:05")
 	// 发起Http请求
-	hc.res, hc.Error = hc.RequestConfig.httpConnPoll.Do(hc.req)
+	hc.res, hc.Error = hc.do(hc.req)
 	if hc.Error != nil {
 		return hc
 	}

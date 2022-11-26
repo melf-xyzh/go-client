@@ -12,6 +12,8 @@ Go-HttpClient的封装实现
   - [ ] 普通上传
   - [ ] 分片上传
 - [x] 保存请求记录
+- [x] 超时设置
+- [x] 请求重试
 
 ## 安装
 
@@ -117,5 +119,13 @@ err = rc.Request("http://127.0.0.1:9001/downloadTemplate", "GET", nil,nil,tableN
 if err != nil {
     panic(err)
 }
+```
+
+#### 重试
+
+```go
+// 直接获取[]byte
+var data []byte
+rc.Request("https://api.vvhan.com/api/reping", "GET", nil, nil, tableName).Retry(10, []int{1, 2, 3, 4, 5, 6, 7, 8, 9}).GetBytes(&data)
 ```
 

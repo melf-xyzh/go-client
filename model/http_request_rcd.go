@@ -19,6 +19,7 @@ type HttpRequestRcd struct {
 	HttpStatus  string `json:"httpStatus"                 gorm:"column:http_status;comment:http请求响应状态;type:varchar(4);"`
 	Latency     int64  `json:"latency"                    gorm:"column:latency;comment:延迟"`
 	Err         string `json:"err"                        gorm:"column:err;comment:请求报错信息;type:text;"`
+	Remark      string `json:"remark"                     gorm:"column:remark;comment:备注;type:text;"`
 	HttpParams
 	HttpSign
 }
