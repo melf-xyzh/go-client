@@ -57,7 +57,7 @@ func (rc *RequestConfig) NewHttpClient() *http.Client {
 			MaxConnsPerHost:     0,   // 单独的host最大链接限制（默认没有限制）
 			// 解决 x509: certificate signed by unknown authority
 			// 通过设置tls.Config的InsecureSkipVerify为true，client将不再对服务端的证书进行校验。
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: rc.InsecureSkipVerify},
 			// 下面与源码一致
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -358,7 +358,7 @@ func (hc *HttpClient) GetBytes(body *[]byte) *HttpClient {
  */
 func (hc *HttpClient) saveRcd() *HttpClient {
 	if hc.RequestConfig.DB == nil {
-		hc.Error = errors.New("数据库链接不存在")
+		return hc
 	}
 	var dbErr error
 	// 只对表创建一次
