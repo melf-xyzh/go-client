@@ -20,6 +20,8 @@ type (
 	Cookies []*http.Cookie
 	// TableName is an option used for RequestClientOptions
 	TableName string
+	// SplitTable is an option used for RequestClientOptions
+	SplitTable bool
 )
 
 type RequestClientOptions interface {
@@ -33,6 +35,7 @@ type RequestClientPr struct {
 	QueryMap    map[string]string
 	HeaderMap   map[string]string
 	Cookies     []*http.Cookie
+	SplitTable  bool
 }
 
 func (o ContentType) setRequestClientOption(pr *RequestClientPr) {
@@ -57,4 +60,8 @@ func (o Cookies) setRequestClientOption(pr *RequestClientPr) {
 
 func (o TableName) setRequestClientOption(pr *RequestClientPr) {
 	pr.TableName = string(o)
+}
+
+func (o SplitTable) setRequestClientOption(pr *RequestClientPr) {
+	pr.SplitTable = bool(o)
 }

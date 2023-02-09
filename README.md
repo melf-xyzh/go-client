@@ -12,6 +12,8 @@ Go-HttpClient的封装实现
   - [ ] 普通上传
   - [ ] 分片上传
 - [x] 保存请求记录
+  - [x] 分表
+
 - [x] 超时设置
 - [x] 请求重试
 
@@ -100,6 +102,9 @@ query := httpclient.QueryMap{
 }
 // 自定义表名
 tableName := httpclient.TableName("music")
+// 按月分表
+splitTable := httpclient.SplitTable(true)
+
 // 定于用于接收返回结果的变量
 var res string
 // 请求

@@ -30,6 +30,10 @@ import (
 
 var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
+type HcError struct {
+	Error string
+}
+
 type HttpClient struct {
 	RequestConfig
 	rcd           *clientmod.HttpRequestRcd
@@ -136,6 +140,11 @@ func (rc *RequestConfig) Request(urlPath, method string, data interface{}, rcd *
 	} else {
 		tableName = rcd.TableName()
 	}
+	// 分表
+	if pr.SplitTable {
+		tableName = tableName + time.Now().Format("_200601")
+	}
+
 	defer func() {
 		hc.saveRcd()
 	}()
@@ -301,12 +310,15 @@ func (hc *HttpClient) request(req *http.Request) (response *http.Response, err e
  *  @return *HttpClient
  */
 func (hc *HttpClient) Retry(retry int, retryInterval []int) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	if retry <= 0 {
 		hc.retry = 1
 	} else {
 		hc.retry = retry
 	}
-	if len(hc.retryInterval) < retry-1 {
+	if len(retryInterval) < retry-1 {
 		hc.Error = errors.New("重试间隔时间不完整")
 	}
 	hc.retryInterval = retryInterval
@@ -321,6 +333,9 @@ func (hc *HttpClient) Retry(retry int, retryInterval []int) *HttpClient {
  *  @return *HttpClient
  */
 func (hc *HttpClient) GetBytes(body *[]byte) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	defer func() {
 		hc.saveRcd()
 	}()
@@ -375,16 +390,18 @@ func (hc *HttpClient) saveRcd() *HttpClient {
 		hc.rcd.ID = commons.UUID()
 		hc.rcd.CreateTime = time.Now().Format("2006-01-02 15:04:05")
 		hc.rcd.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
-		hc.Error = hc.DB.Table(hc.tableName).Create(&hc.rcd).Error
-		if hc.Error != nil {
-			log.Println("更新数据失败", hc.Error)
+		dbErr = hc.DB.Table(hc.tableName).Create(&hc.rcd).Error
+		if dbErr != nil {
+			log.Println("更新数据失败", dbErr)
+			hc.Error = dbErr
 			return hc
 		}
 	} else {
 		hc.rcd.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
-		hc.Error = hc.DB.Table(hc.tableName).Updates(&hc.rcd).Error
-		if hc.Error != nil {
-			log.Println("更新数据失败", hc.Error)
+		dbErr = hc.DB.Table(hc.tableName).Updates(&hc.rcd).Error
+		if dbErr != nil {
+			log.Println("更新数据失败", dbErr)
+			hc.Error = dbErr
 			return hc
 		}
 	}
@@ -416,6 +433,9 @@ func (hc *HttpClient) SaveReturnBizData(result interface{}) {
  *  @return *HttpClient
  */
 func (hc *HttpClient) GetMap(m map[string]interface{}) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	var body []byte
 	hc.Error = hc.GetBytes(&body).Error
 	if hc.Error != nil {
@@ -433,6 +453,9 @@ func (hc *HttpClient) GetMap(m map[string]interface{}) *HttpClient {
  *  @return *HttpClient
  */
 func (hc *HttpClient) GetStruct(data interface{}) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	var body []byte
 	hc.Error = hc.GetBytes(&body).Error
 	if hc.Error != nil {
@@ -450,6 +473,9 @@ func (hc *HttpClient) GetStruct(data interface{}) *HttpClient {
  *  @return *HttpClient
  */
 func (hc *HttpClient) GetString(str *string) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	var body []byte
 	hc.Error = hc.GetBytes(&body).Error
 	if hc.Error != nil {
@@ -469,6 +495,9 @@ func (hc *HttpClient) GetString(str *string) *HttpClient {
  *  @return *HttpClient
  */
 func (hc *HttpClient) DownloadFile(filePath, fileName string) *HttpClient {
+	if hc == nil || hc.Error != nil {
+		return hc
+	}
 	defer func() {
 		hc.saveRcd()
 	}()
